@@ -4,57 +4,99 @@
 #define BUFFER_SIZE 256
 #define STACK_SIZE 256
 
-enum SyntaxElement {
-    OP_PARENTH = 1,
-    OP_BRACKET,
-    OP_BRACE,
-    CL_PARENTH,
-    CL_BRACKET,
-    CL_BRACE,
-};
+typedef struct {
+    char element;
+    int line;
+    int index;
+} StackItem;
 
-int SYNTAX_STACK[STACK_SIZE];
+StackItem SYNTAX_STACK[STACK_SIZE];
 int CURSOR_IDX = 0;
 int S_SIZE = 0;
 
-int push_stack(int value) {
+void push_stack(char el, int line, int idx) {
+    if (S_SIZE > STACK_SIZE) {
+        fprintf(stderr, "Overflow: S_SIZE > STACK_SIZE\n");
+        exit(1);
+    }
+    SYNTAX_STACK[CURSOR_IDX++] = (StackItem){el, line, idx};
     S_SIZE++;
-    return SYNTAX_STACK[CURSOR_IDX++] = value;
 }
 
-int pop_stack(void) {
-    if (S_SIZE > 0) {
-        S_SIZE--;
-        return SYNTAX_STACK[--CURSOR_IDX];
+StackItem pop_stack(void) {
+    if (S_SIZE <= 0) {
+        fprintf(stderr, "Underflow: S_SIZE <= 0\n");
+        exit(1);
     }
-    if (S_SIZE < 0)
-        S_SIZE = 0;
-    return -1;
+    S_SIZE--;
+    return SYNTAX_STACK[--CURSOR_IDX];
 }
 
-int peek_stack(int pos) {
-    if (S_SIZE > 0 && pos < S_SIZE) {
-        return SYNTAX_STACK[(CURSOR_IDX - 1 - pos)];
+int matching_pair(char op, char cl) {
+    return (op == '(' && cl == ')') || (op == '[' && cl == ']') ||
+           (op == '{' && cl == '}');
+}
+
+void checkmatch(FILE* file) {
+    char buffer[BUFFER_SIZE];
+    int i;
+    char c;
+    int idx;
+    int line_number = 1;
+
+    while (fgets(buffer, BUFFER_SIZE, file)) {
+        i = 0;
+        idx = 0;
+        while (buffer[i] != '\0') {
+            c = buffer[i];
+            idx++;
+
+            switch (c) {
+                case '(':
+                case '[':
+                case '{':
+                    push_stack(c, line_number, idx);
+                    break;
+                case ')':
+                case ']':
+                case '}':
+                    if (S_SIZE == 0) {
+                        fprintf(stderr,
+                                "Error: Unexpected '%c' on line %d:%d\n", c,
+                                line_number, idx);
+                        return;
+                    }
+                    StackItem top = pop_stack();
+                    if (!matching_pair(top.element, c)) {
+                        fprintf(stderr,
+                                "Error: Unexpected '%c' on line:%d:%d. "
+                                "(Expected "
+                                "matching '%c' from line:%d:%d))\n",
+                                c, line_number, idx, top.element, top.line,
+                                top.index);
+                        return;
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            i++;
+        }
+
+        line_number++;
     }
-    return -1;
-}
-
-int peek_stack_until(int value) {
-    int ret, i;
-    i = 0;
-    while ((ret = peek_stack(i) != -1)) {
-        if (ret == value)
-            return value;
-        i++;
+    // Check for any remaining unmatched opening elements
+    while (S_SIZE > 0) {
+        StackItem unmatched = pop_stack();
+        fprintf(stderr, "Unmatched '%c' on line:%d:%d\n", unmatched.element,
+                unmatched.line, unmatched.index);
     }
-    return -1;
 }
-
-void checkmatch() {}
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        printf("Usage: detab file1\n");
+        printf("Usage: %s file\n", argv[0]);
         exit(1);
     }
 
@@ -62,39 +104,11 @@ int main(int argc, char* argv[]) {
     FILE* file = fopen(pathname, "r");
     if (file == NULL) {
         fprintf(stderr, "Can't open %s\n", pathname);
-        return 0;
+        return 1;
     }
 
-    char* buffer = (char*)malloc(sizeof(char) * BUFFER_SIZE);
-    while ((fgets(buffer, BUFFER_SIZE, file))) {
-        int c, i;
-        i = 0;
-        while ((c = buffer[i]) != EOF && c != '\0') {
-            switch (c) {
-                case '(':
-                    push_stack(OP_PARENTH);
-                    break;
-                case '[':
-                    push_stack(OP_BRACKET);
-                    break;
-                case '{':
-                    push_stack(OP_BRACE);
-                    break;
-                case ')':
-                    push_stack(CL_PARENTH);
-                    break;
-                case ']':
-                    push_stack(CL_BRACKET);
-                    break;
-                case '}':
-                    push_stack(CL_BRACE);
-                    break;
-            }
-            i++;
-        }
-    }
+    checkmatch(file);
 
     fclose(file);
-    free(buffer);
     return 0;
 }
