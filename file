@@ -2,13 +2,15 @@
  * Comments on multiple lines.
  * { ( [ <- Should not raise an error.
  * // <- Should not cause the program to act weird.
-*/
+ */
 
-// " <- Is not and unclosed quote
+// " <- Is not an unclosed quote
+
 #include <stdio.h>
 
 int main(void) {
+    // Print "Hello, World!" to the standard output
     printf("Hello, World!");
-    putchar('\n); // Should be an error
+    putchar('\n');
     return 0;
 }
