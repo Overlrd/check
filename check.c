@@ -74,8 +74,8 @@ bool in_comment(char c, char prev_c, bool* single_line, bool* multi_line) {
 }
 
 void process_char(Stack* stack, char c, char prev_c, int line, int index,
-                  bool* in_string, bool* sg_line_comment, bool* ml_line_comment,
-                  bool empty_line) {
+                  bool* in_string, bool* sg_line_comment,
+                  bool* ml_line_comment) {
 
     if (*in_string) {
         if ((c == '"' || c == '\'') && prev_c != '\\') {
@@ -122,14 +122,11 @@ void check_file(FILE* file) {
     bool sg_line_comment = false;  // Inside a single line comment ?
     bool ml_line_comment = false;  // Inside a "/*" comment ?
     bool in_string = false;
-    bool empty_line = false;
 
     while (fgets(buffer, BUFFER_SIZE, file)) {
-        empty_line = (buffer[0] == '\n');
         for (int i = 0; buffer[i] != '\0'; i++) {
             process_char(&stack, buffer[i], prev_c, line_number, i + 1,
-                         &in_string, &sg_line_comment, &ml_line_comment,
-                         empty_line);
+                         &in_string, &sg_line_comment, &ml_line_comment);
             prev_c = buffer[i];
         }
         line_number++;
