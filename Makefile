@@ -1,4 +1,3 @@
-# Clean up build artifacts
 .PHONY: clean
 
 # Compiler and flags
@@ -13,5 +12,6 @@ all: $(TARGET)
 $(TARGET): main.c
 	$(CC) $(CFLAGS) $< -o $@
 
+# Clean up build artifacts
 clean:
 	rm -f $(TARGET)

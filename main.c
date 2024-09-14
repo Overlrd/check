@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,105 +11,142 @@ typedef struct {
     int index;
 } StackItem;
 
-StackItem SYNTAX_STACK[STACK_SIZE];
-int CURSOR_IDX = 0;
-int S_SIZE = 0;
+typedef struct {
+    StackItem items[STACK_SIZE];
+    int top;
+} Stack;
 
-void push_stack(char el, int line, int idx) {
-    if (S_SIZE > STACK_SIZE) {
-        fprintf(stderr, "Overflow: S_SIZE > STACK_SIZE\n");
+void stack_init(Stack* s) {
+    s->top = -1;
+}
+
+bool stack_is_empty(Stack* s) {
+    return s->top == -1;
+}
+
+void stack_push(Stack* s, char el, int line, int idx) {
+    if (s->top >= STACK_SIZE - 1) {
+        fprintf(stderr, "Stack overflow\n");
         exit(1);
     }
-    SYNTAX_STACK[CURSOR_IDX++] = (StackItem){el, line, idx};
-    S_SIZE++;
+    s->top++;
+    s->items[s->top] = (StackItem){el, line, idx};
 }
 
-StackItem pop_stack(void) {
-    if (S_SIZE <= 0) {
-        fprintf(stderr, "Underflow: S_SIZE <= 0\n");
+StackItem stack_pop(Stack* s) {
+    if (stack_is_empty(s)) {
+        fprintf(stderr, "Stack underflow\n");
         exit(1);
     }
-    S_SIZE--;
-    return SYNTAX_STACK[--CURSOR_IDX];
+    return s->items[s->top--];
 }
 
-int matching_pair(char op, char cl) {
-    return (op == '(' && cl == ')') || (op == '[' && cl == ']') ||
-           (op == '{' && cl == '}');
+bool is_opening(char c) {
+    return c == '(' || c == '[' || c == '{' || c == '"';
 }
 
-void checkmatch(FILE* file) {
+bool is_closing(char c) {
+    return c == ')' || c == ']' || c == '}' || c == '"';
+}
+
+bool matches(char opening, char closing) {
+    return (opening == '(' && closing == ')') ||
+           (opening == '[' && closing == ']') ||
+           (opening == '{' && closing == '}') ||
+           (opening == '"' && closing == '"');
+}
+
+bool in_comment(char c, char prev_c, bool* single_line, bool* multi_line) {
+    if (*single_line && c == '\n') {
+        *single_line = false;
+    } else if (*multi_line && prev_c == '*' && c == '/') {
+        *multi_line = false;
+    } else if (!*single_line && !*multi_line) {
+        if (prev_c == '/' && c == '/') {
+            *single_line = true;
+        } else if (prev_c == '/' && c == '*') {
+            *multi_line = true;
+        }
+    }
+    return *single_line || *multi_line;
+}
+
+void process_char(Stack* stack, char c, char prev_c, int line, int index,
+                  bool* in_string, bool* sg_line_comment,
+                  bool* ml_line_comment) {
+
+    if (*in_string) {
+        if (c == '"' && prev_c != '\\')
+            *in_string = false;
+        return;
+    }
+
+    if (in_comment(c, prev_c, sg_line_comment, ml_line_comment)) {
+        return;
+    }
+
+    if (c == '"' && prev_c != '\\') {
+        *in_string = true;
+        return;
+    }
+
+    if (is_opening(c)) {
+        stack_push(stack, c, line, index);
+    } else if (is_closing(c)) {
+        if (stack_is_empty(stack)) {
+            fprintf(stderr, "Error: Unexpected '%c' on line %d:%d\n", c, line,
+                    index);
+            return;
+        }
+        StackItem top = stack_pop(stack);
+        if (!matches(top.element, c)) {
+            fprintf(stderr,
+                    "Error: Mismatched '%c' on line %d:%d. Expected matching "
+                    "'%c' from line %d:%d\n",
+                    c, line, index, top.element, top.line, top.index);
+        }
+    }
+}
+
+void check_file(FILE* file) {
     char buffer[BUFFER_SIZE];
-    int i;
-    char c;
-    int idx;
     int line_number = 1;
+    char prev_c = 0;
+    Stack stack;
+    stack_init(&stack);
+    bool sg_line_comment = false;  // Inside a single line comment ?
+    bool ml_line_comment = false;  // Inside a "/*" comment ?
+    bool in_string = false;
 
     while (fgets(buffer, BUFFER_SIZE, file)) {
-        i = 0;
-        idx = 0;
-        while (buffer[i] != '\0') {
-            c = buffer[i];
-            idx++;
-
-            switch (c) {
-                case '(':
-                case '[':
-                case '{':
-                    push_stack(c, line_number, idx);
-                    break;
-                case ')':
-                case ']':
-                case '}':
-                    if (S_SIZE == 0) {
-                        fprintf(stderr,
-                                "Error: Unexpected '%c' on line %d:%d\n", c,
-                                line_number, idx);
-                        return;
-                    }
-                    StackItem top = pop_stack();
-                    if (!matching_pair(top.element, c)) {
-                        fprintf(stderr,
-                                "Error: Unexpected '%c' on line:%d:%d. "
-                                "(Expected "
-                                "matching '%c' from line:%d:%d))\n",
-                                c, line_number, idx, top.element, top.line,
-                                top.index);
-                        return;
-                    }
-                    break;
-                default:
-                    break;
-            }
-
-            i++;
+        for (int i = 0; buffer[i] != '\0'; i++) {
+            process_char(&stack, buffer[i], prev_c, line_number, i + 1,
+                         &in_string, &sg_line_comment, &ml_line_comment);
+            prev_c = buffer[i];
         }
-
         line_number++;
     }
-    // Check for any remaining unmatched opening elements
-    while (S_SIZE > 0) {
-        StackItem unmatched = pop_stack();
-        fprintf(stderr, "Unmatched '%c' on line:%d:%d\n", unmatched.element,
+
+    while (!stack_is_empty(&stack)) {
+        StackItem unmatched = stack_pop(&stack);
+        fprintf(stderr, "Unmatched '%c' on line %d:%d\n", unmatched.element,
                 unmatched.line, unmatched.index);
     }
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        printf("Usage: %s file\n", argv[0]);
-        exit(1);
-    }
-
-    char* pathname = argv[1];
-    FILE* file = fopen(pathname, "r");
-    if (file == NULL) {
-        fprintf(stderr, "Can't open %s\n", pathname);
+        fprintf(stderr, "Usage: %s file\n", argv[0]);
         return 1;
     }
 
-    checkmatch(file);
+    FILE* file = fopen(argv[1], "r");
+    if (file == NULL) {
+        fprintf(stderr, "Can't open %s\n", argv[1]);
+        return 1;
+    }
 
+    check_file(file);
     fclose(file);
     return 0;
 }
